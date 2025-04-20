@@ -11,9 +11,10 @@ async function fetchModels() {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:137.0) Gecko/20100101 Firefox/137.0",
-        "Origin": "https://freeaichatplayground.com",
-        "Referer": "https://freeaichatplayground.com/chat",
+        "User-Agent":
+          "Mozilla/5.0 (X11; Linux x86_64; rv:137.0) Gecko/20100101 Firefox/137.0",
+        Origin: "https://freeaichatplayground.com",
+        Referer: "https://freeaichatplayground.com/chat",
       },
       body: JSON.stringify({ type: "text" }),
     });
@@ -34,7 +35,7 @@ async function fetchModels() {
 function transformModelsToOpenAIFormat(models) {
   return {
     object: "list",
-    data: models.map(model => ({
+    data: models.map((model) => ({
       id: model.name,
       object: "model",
       created: new Date(model.createdAt).getTime() / 1000,
@@ -52,21 +53,22 @@ async function parseSSEResponse(response) {
   let content = "";
   let id = `chatcmpl-${Date.now()}`;
   let finishReason = "stop";
-  
+
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      
+
       const chunk = new TextDecoder().decode(value);
       content += chunk;
     }
-    
+
     // 解析所有 SSE 消息
-    const messages = content.split('\n\n')
-      .filter(msg => msg.trim().startsWith('data:'))
-      .map(msg => {
-        const jsonStr = msg.replace('data:', '').trim();
+    const messages = content
+      .split("\n\n")
+      .filter((msg) => msg.trim().startsWith("data:"))
+      .map((msg) => {
+        const jsonStr = msg.replace("data:", "").trim();
         try {
           return JSON.parse(jsonStr);
         } catch (e) {
@@ -75,58 +77,73 @@ async function parseSSEResponse(response) {
         }
       })
       .filter(Boolean);
-    
+
     // 找到最后一条完整消息
-    const lastCompleteMessage = messages.findLast(msg => 
-      msg.choices && msg.choices[0] && msg.choices[0].message && msg.choices[0].message.content
+    const lastCompleteMessage = messages.findLast(
+      (msg) =>
+        msg.choices &&
+        msg.choices[0] &&
+        msg.choices[0].message &&
+        msg.choices[0].message.content
     );
-    
+
     if (lastCompleteMessage) {
       id = lastCompleteMessage.id || id;
-      if (lastCompleteMessage.choices && 
-          lastCompleteMessage.choices[0] && 
-          lastCompleteMessage.choices[0].finish_reason) {
+      if (
+        lastCompleteMessage.choices &&
+        lastCompleteMessage.choices[0] &&
+        lastCompleteMessage.choices[0].finish_reason
+      ) {
         finishReason = lastCompleteMessage.choices[0].finish_reason;
       }
-      
+
       return {
         id,
         content: lastCompleteMessage.choices[0].message.content,
         finish_reason: finishReason,
-        usage: lastCompleteMessage.usage || null
+        usage: lastCompleteMessage.usage || null,
       };
     }
-    
+
     // 如果没有找到完整消息，尝试从所有消息中提取内容
     let combinedContent = "";
     for (const msg of messages) {
-      if (msg.choices && msg.choices[0] && msg.choices[0].delta && msg.choices[0].delta.content) {
+      if (
+        msg.choices &&
+        msg.choices[0] &&
+        msg.choices[0].delta &&
+        msg.choices[0].delta.content
+      ) {
         combinedContent += msg.choices[0].delta.content;
-      } else if (msg.choices && msg.choices[0] && msg.choices[0].message && msg.choices[0].message.content) {
+      } else if (
+        msg.choices &&
+        msg.choices[0] &&
+        msg.choices[0].message &&
+        msg.choices[0].message.content
+      ) {
         combinedContent += msg.choices[0].message.content;
       }
     }
-    
+
     return {
       id,
       content: combinedContent || "No content found in response",
       finish_reason: finishReason,
-      usage: null
+      usage: null,
     };
-    
   } catch (error) {
     console.error("Error parsing SSE response:", error);
     return {
       id,
       content: "Error parsing response: " + error.message,
       finish_reason: "error",
-      usage: null
+      usage: null,
     };
   }
 }
 
 // 发送聊天请求到 freeaichatplayground
-async function sendChatRequest(modelName, messages) {
+async function sendChatRequest(apiKey, modelName, messages) {
   try {
     const formattedMessages = messages.map((msg, index) => ({
       id: `${Date.now() + index}`,
@@ -137,20 +154,20 @@ async function sendChatRequest(modelName, messages) {
         name: modelName,
         icon: "",
         provider: "",
-        contextWindow: 63920
-      }
+        contextWindow: 63920,
+      },
     }));
 
     // 获取模型列表以找到正确的ID
     const models = await fetchModels();
-    const selectedModel = models.find(m => m.name === modelName);
-    
+    const selectedModel = models.find((m) => m.name === modelName);
+
     if (!selectedModel) {
       throw new Error(`Model "${modelName}" not found`);
     }
-    
+
     // 填充模型信息
-    formattedMessages.forEach(msg => {
+    formattedMessages.forEach((msg) => {
       if (msg.model) {
         msg.model.id = selectedModel.id;
         msg.model.icon = selectedModel.icon;
@@ -162,19 +179,24 @@ async function sendChatRequest(modelName, messages) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:137.0) Gecko/20100101 Firefox/137.0",
-        "Origin": "https://freeaichatplayground.com",
-        "Referer": "https://freeaichatplayground.com/chat",
+        "User-Agent":
+          "Mozilla/5.0 (X11; Linux x86_64; rv:137.0) Gecko/20100101 Firefox/137.0",
+        Origin: "https://freeaichatplayground.com",
+        Referer: "https://freeaichatplayground.com/chat",
       },
       body: JSON.stringify({
         model: modelName,
         messages: formattedMessages,
+        apiKey: apiKey,
+        // config: { temperature: 0.7, maxTokens: 100000 },
       }),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`Chat completion failed: ${response.status} - ${errorText}`);
+      throw new Error(
+        `Chat completion failed: ${response.status} - ${errorText}`
+      );
     }
 
     // 处理 SSE 流式响应
@@ -212,7 +234,7 @@ function transformChatResponseToOpenAIFormat(response, modelName) {
 }
 
 // 处理流式响应请求
-async function handleStreamRequest(request, modelName, messages) {
+async function handleStreamRequest(request, apiKey, modelName, messages) {
   const encoder = new TextEncoder();
   const formattedMessages = messages.map((msg, index) => ({
     id: `${Date.now() + index}`,
@@ -223,20 +245,20 @@ async function handleStreamRequest(request, modelName, messages) {
       name: modelName,
       icon: "",
       provider: "",
-      contextWindow: 63920
-    }
+      contextWindow: 63920,
+    },
   }));
 
   // 获取模型列表以找到正确的ID
   const models = await fetchModels();
-  const selectedModel = models.find(m => m.name === modelName);
-  
+  const selectedModel = models.find((m) => m.name === modelName);
+
   if (!selectedModel) {
     throw new Error(`Model "${modelName}" not found`);
   }
-  
+
   // 填充模型信息
-  formattedMessages.forEach(msg => {
+  formattedMessages.forEach((msg) => {
     if (msg.model) {
       msg.model.id = selectedModel.id;
       msg.model.icon = selectedModel.icon;
@@ -248,62 +270,71 @@ async function handleStreamRequest(request, modelName, messages) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:137.0) Gecko/20100101 Firefox/137.0",
-      "Origin": "https://freeaichatplayground.com",
-      "Referer": "https://freeaichatplayground.com/chat",
+      "User-Agent":
+        "Mozilla/5.0 (X11; Linux x86_64; rv:137.0) Gecko/20100101 Firefox/137.0",
+      Origin: "https://freeaichatplayground.com",
+      Referer: "https://freeaichatplayground.com/chat",
     },
     body: JSON.stringify({
       model: modelName,
       messages: formattedMessages,
       stream: true,
+      apiKey: apiKey,
+      // config: { temperature: 0.7, maxTokens: 100000 },
     }),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Chat completion failed: ${response.status} - ${errorText}`);
+    throw new Error(
+      `Chat completion failed: ${response.status} - ${errorText}`
+    );
   }
 
   const stream = new ReadableStream({
     async start(controller) {
       const reader = response.body.getReader();
       const chatId = `chatcmpl-${Date.now()}`;
-      
+
       // 发送初始消息
       const initialChunk = {
         id: chatId,
         object: "chat.completion.chunk",
         created: Math.floor(Date.now() / 1000),
         model: modelName,
-        choices: [{
-          index: 0,
-          delta: { role: "assistant" },
-          finish_reason: null
-        }]
+        choices: [
+          {
+            index: 0,
+            delta: { role: "assistant" },
+            finish_reason: null,
+          },
+        ],
       };
-      controller.enqueue(encoder.encode(`data: ${JSON.stringify(initialChunk)}\n\n`));
-      
+      controller.enqueue(
+        encoder.encode(`data: ${JSON.stringify(initialChunk)}\n\n`)
+      );
+
       try {
         let buffer = "";
-        
+
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          
+
           const chunk = new TextDecoder().decode(value);
           buffer += chunk;
-          
+
           // 处理缓冲区中的所有完整 SSE 消息
-          const messages = buffer.split('\n\n');
+          const messages = buffer.split("\n\n");
           buffer = messages.pop() || ""; // 保留最后一个可能不完整的消息
-          
+
           for (const msg of messages) {
-            if (!msg.trim().startsWith('data:')) continue;
-            
+            if (!msg.trim().startsWith("data:")) continue;
+
             try {
-              const jsonStr = msg.replace('data:', '').trim();
+              const jsonStr = msg.replace("data:", "").trim();
               const data = JSON.parse(jsonStr);
-              
+
               if (data.choices && data.choices[0]) {
                 // 转换为 OpenAI 流式格式
                 const openAIChunk = {
@@ -311,22 +342,31 @@ async function handleStreamRequest(request, modelName, messages) {
                   object: "chat.completion.chunk",
                   created: Math.floor(Date.now() / 1000),
                   model: modelName,
-                  choices: [{
-                    index: 0,
-                    delta: {},
-                    finish_reason: data.choices[0].finish_reason || null
-                  }]
+                  choices: [
+                    {
+                      index: 0,
+                      delta: {},
+                      finish_reason: data.choices[0].finish_reason || null,
+                    },
+                  ],
                 };
-                
+
                 // 提取内容
                 if (data.choices[0].delta && data.choices[0].delta.content) {
-                  openAIChunk.choices[0].delta.content = data.choices[0].delta.content;
-                } else if (data.choices[0].message && data.choices[0].message.content) {
-                  openAIChunk.choices[0].delta.content = data.choices[0].message.content;
+                  openAIChunk.choices[0].delta.content =
+                    data.choices[0].delta.content;
+                } else if (
+                  data.choices[0].message &&
+                  data.choices[0].message.content
+                ) {
+                  openAIChunk.choices[0].delta.content =
+                    data.choices[0].message.content;
                 }
-                
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify(openAIChunk)}\n\n`));
-                
+
+                controller.enqueue(
+                  encoder.encode(`data: ${JSON.stringify(openAIChunk)}\n\n`)
+                );
+
                 // 如果是最后一条消息，发送 [DONE]
                 if (data.choices[0].finish_reason) {
                   controller.enqueue(encoder.encode("data: [DONE]\n\n"));
@@ -338,7 +378,7 @@ async function handleStreamRequest(request, modelName, messages) {
             }
           }
         }
-        
+
         // 确保发送最终的 [DONE] 消息
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         controller.close();
@@ -346,24 +386,24 @@ async function handleStreamRequest(request, modelName, messages) {
         console.error("Stream processing error:", error);
         controller.error(error);
       }
-    }
+    },
   });
 
   return new Response(stream, {
     headers: {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
-      "Connection": "keep-alive",
+      Connection: "keep-alive",
       "Access-Control-Allow-Origin": "*",
-    }
+    },
   });
 }
 
 // 处理请求
-async function handleRequest(request) {
+async function handleRequest(request: Request) {
   const url = new URL(request.url);
   const path = url.pathname;
-
+  console.log("handleRequest == ", request);
   // CORS 预检请求处理
   if (request.method === "OPTIONS") {
     return new Response(null, {
@@ -389,45 +429,55 @@ async function handleRequest(request) {
       const openAIModels = transformModelsToOpenAIFormat(models);
       return new Response(JSON.stringify(openAIModels), { headers });
     }
-    
+
     // 聊天完成接口
     else if (path === "/v1/chat/completions" && request.method === "POST") {
       const requestData = await request.json();
       const modelName = requestData.model || DEFAULT_MODEL;
       const messages = requestData.messages || [];
       const stream = requestData.stream || false;
-      
+      const apiKey = request.headers.get("x-api-key") || "";
+
       // 处理流式响应
       if (stream) {
-        return handleStreamRequest(request, modelName, messages);
+        return handleStreamRequest(request, apiKey, modelName, messages);
       }
-      
+
       // 处理普通响应
-      const chatResponse = await sendChatRequest(modelName, messages);
-      const openAIResponse = transformChatResponseToOpenAIFormat(chatResponse, modelName);
-      
+      const chatResponse = await sendChatRequest(apiKey, modelName, messages);
+      const openAIResponse = transformChatResponseToOpenAIFormat(
+        chatResponse,
+        modelName
+      );
+
       return new Response(JSON.stringify(openAIResponse), { headers });
     }
-    
+
     // 未知路径
     else {
-      return new Response(JSON.stringify({
-        error: {
-          message: "Not found",
-          type: "invalid_request_error",
-          code: "path_not_found",
-        }
-      }), { status: 404, headers });
+      return new Response(
+        JSON.stringify({
+          error: {
+            message: "Not found",
+            type: "invalid_request_error",
+            code: "path_not_found",
+          },
+        }),
+        { status: 404, headers }
+      );
     }
   } catch (error) {
     console.error("Error handling request:", error);
-    return new Response(JSON.stringify({
-      error: {
-        message: error.message,
-        type: "server_error",
-        code: "internal_server_error",
-      }
-    }), { status: 500, headers });
+    return new Response(
+      JSON.stringify({
+        error: {
+          message: error.message,
+          type: "server_error",
+          code: "internal_server_error",
+        },
+      }),
+      { status: 500, headers }
+    );
   }
 }
 
