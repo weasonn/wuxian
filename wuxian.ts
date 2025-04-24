@@ -40,7 +40,7 @@ const AVAILABLE_MODELS: OpenAIModel[] = [
     object: "model",
   },
   {
-    id: "gemini-2.5-flash",
+    id: "grok-3-mini",
     created: Date.now(),
     object: "model",
   },
