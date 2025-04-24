@@ -70,7 +70,7 @@ function convertOpenAIToUnlimitedBody(openaiBody: any): any {
   return {
     id: openaiBody.id || crypto.randomUUID(),
     messages: convertOpenAIToUnlimitedMessages(openaiBody.messages),
-    selectedChatModel: openaiBody.model || "unlimitedai-chat",
+    selectedChatModel: openaiBody.model || "chat-model-reasoning",
   };
 }
 
@@ -127,7 +127,7 @@ async function* transformStreamResponse(
             id: messageId || crypto.randomUUID(),
             object: "chat.completion.chunk",
             created: Math.floor(Date.now() / 1000),
-            model: "unlimitedai-chat",
+            model: "chat-model-reasoning",
             choices: [
               {
                 delta,
@@ -145,7 +145,7 @@ async function* transformStreamResponse(
             id: messageId || crypto.randomUUID(),
             object: "chat.completion.chunk",
             created: Math.floor(Date.now() / 1000),
-            model: "unlimitedai-chat",
+            model: "chat-model-reasoning",
             choices: [
               {
                 delta,
@@ -199,7 +199,7 @@ async function transformNonStreamResponse(text: string): Promise<any> {
     id: data.f?.messageId || crypto.randomUUID(),
     object: "chat.completion",
     created: Math.floor(Date.now() / 1000),
-    model: "unlimitedai-chat",
+    model: "chat-model-reasoning",
     choices: [
       {
         index: 0,
@@ -330,14 +330,14 @@ async function handler(req: Request): Promise<Response> {
           object: "list",
           data: [
             {
-              id: "unlimitedai-chat",
+              id: "chat-model-reasoning",
               object: "model",
-              created: 1745498756,
+              created: 0,
               owned_by: "unlimitedai",
               permission: [{
-                id: "modelperm-unlimitedai-chat",
+                id: "modelperm-chat-model-reasoning",
                 object: "model_permission",
-                created: 1745498756,
+                created: 0,
                 allow_create_engine: false,
                 allow_sampling: true,
                 allow_logprobs: false,
@@ -348,7 +348,7 @@ async function handler(req: Request): Promise<Response> {
                 group: null,
                 is_blocking: false,
               }],
-              root: "unlimitedai-chat",
+              root: "chat-model-reasoning",
               parent: null,
             },
           ],
