@@ -332,12 +332,12 @@ async function handler(req: Request): Promise<Response> {
             {
               id: "unlimitedai-chat",
               object: "model",
-              created: 0,
+              created: 1745498756,
               owned_by: "unlimitedai",
               permission: [{
                 id: "modelperm-unlimitedai-chat",
                 object: "model_permission",
-                created: 0,
+                created: 1745498756,
                 allow_create_engine: false,
                 allow_sampling: true,
                 allow_logprobs: false,
