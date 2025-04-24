@@ -229,13 +229,12 @@ async function handleChatCompletions(
     // 转换为 UnlimitedAI.Chat 请求体
     const unlimitedBody = convertOpenAIToUnlimitedBody(openaiBody);
     
-    // 只转发必要 headers
-    const upstreamHeaders = {
-	"Host": "app.unlimitedai.chat",
-    "content-type": "application/json",
-	"User-Agent": "Mozilla/5.0 (X11; Windows x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
-      // 可以根据需要转发 Authorization 等
-    };
+// 只转发必要 headers
+  const upstreamHeaders = {
+    "Host": "app.unlimitedai.chat",
+    "Content-Type": "application/json",
+    "User-Agent": "Mozilla/5.0 (X11; Windows x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+  };
     
     // 转发到 UnlimitedAI.Chat
     const upstreamRes = await fetch(UNLIMITED_AI_URL, {
