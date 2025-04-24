@@ -1,185 +1,99 @@
-const express = require('express');
-const { v4: uuidv4 } = require('uuid');
-const app = express();
+import { serve } from "https://deno.land/std@0.220.1/http/server.ts";
 
-// 中间件
-app.use(express.json());
-app.use(express.text());
+// 定义常量
+const UNLIMITED_AI_URL = "https://app.unlimitedai.chat/api/chat";
+const PORT = 3000;
+const MAX_RETRIES = 3;
 
-// 认证中间件 - 使用全局变量加载方式
-const AUTH_TOKEN = process.env.AUTH_TOKEN || '';
-const authMiddleware = (req, res, next) => {
-  if (AUTH_TOKEN) {
-    const requestToken = req.headers.authorization || '';
-    const token = requestToken.replace('Bearer ', '');
-    if (token !== AUTH_TOKEN) {
-      return res.status(401).send('Access Denied');
-    }
+// 定义接口
+interface UnlimitedAIMessage {
+  id: string;
+  createdAt: string;
+  role: string;
+  content: string;
+  parts: Array<{ type: string; text: string }>;
+}
+
+interface OpenAIMessage {
+  role: string;
+  content: string;
+}
+
+// 将OpenAI消息转换为UnlimitedAI消息
+function convertOpenAIToUnlimitedMessages(messages: OpenAIMessage[]): UnlimitedAIMessage[] {
+  // 提取系统消息
+  const systemMessages = messages.filter(msg => msg.role === "system");
+  const nonSystemMessages = messages.filter(msg => msg.role !== "system");
+  
+  const result: UnlimitedAIMessage[] = [];
+  
+  // 如果有系统消息，将其转换为用户消息和助手回复
+  if (systemMessages.length > 0) {
+    // 合并所有系统消息内容
+    const systemContent = systemMessages.map(msg => msg.content).join("\n\n");
+    
+    // 添加作为用户消息的系统提示
+    result.push({
+      id: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+      role: "user",
+      content: systemContent,
+      parts: [{ type: "text", text: systemContent }],
+    });
+    
+    // 添加助手确认回复
+    result.push({
+      id: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+      role: "assistant",
+      content: "Ok, I got it, I'll remember it and do it.",
+      parts: [{ type: "text", text: "Ok, I got it, I'll remember it and do it." }],
+    });
   }
-  next();
-};
-
-// 工具：OpenAI -> UnlimitedAI.Chat 消息格式转换
-function openaiToUnlimitedMessages(messages) {
-  return messages
-    .filter((msg) => msg.role !== "system")
-    .map((msg) => ({
-      id: uuidv4(),
+  
+  // 添加其余非系统消息
+  nonSystemMessages.forEach(msg => {
+    result.push({
+      id: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
       role: msg.role,
       content: msg.content,
       parts: [{ type: "text", text: msg.content }],
-    }));
+    });
+  });
+  
+  return result;
 }
 
-// 工具：OpenAI -> UnlimitedAI.Chat 请求体转换
-function openaiToUnlimitedBody(openaiBody) {
+// 将OpenAI请求体转换为UnlimitedAI请求体
+function convertOpenAIToUnlimitedBody(openaiBody: any): any {
   return {
-    id: openaiBody.id || uuidv4(),
-    messages: openaiToUnlimitedMessages(openaiBody.messages),
-    selectedChatModel: openaiBody.model || "chat-model-reasoning",
-    // 你可以根据需要添加更多字段映射
+    id: openaiBody.id || crypto.randomUUID(),
+    messages: convertOpenAIToUnlimitedMessages(openaiBody.messages),
+    selectedChatModel: openaiBody.model || "unlimitedai-chat",
   };
 }
 
-// 处理聊天请求
-app.post('/v1/chat/completions', authMiddleware, async (req, res) => {
+// 处理流式响应
+async function* transformStreamResponse(
+  reader: ReadableStreamDefaultReader<Uint8Array>
+): AsyncGenerator<string> {
+  let buffer = "";
+  const decoder = new TextDecoder();
+  let messageId = "";
+  let firstResult = true;
+
   try {
-    // 1. 解析 OpenAI 请求
-    const openaiBody = req.body;
-    const isStream = openaiBody.stream === true;
-    
-    // 只转发必要 headers
-    const upstreamHeaders = {
-      "content-type": "application/json",
-      // 你可以根据需要转发 Authorization 等
-    };
-    
-    // 2. 转换为 UnlimitedAI.Chat 请求体
-    const unlimitedBody = openaiToUnlimitedBody(openaiBody);
-
-    // 3. 转发到 UnlimitedAI.Chat
-    const response = await fetch("https://app.unlimitedai.chat/api/chat", {
-      method: "POST",
-      headers: upstreamHeaders,
-      body: JSON.stringify(unlimitedBody),
-    });
-
-    if (!response.ok) {
-      throw new Error(`UnlimitedAI.Chat API responded with status: ${response.status}`);
-    }
-
-    if (isStream) {
-      // 4.1 流式响应（SSE）
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
-
-      const reader = response.body;
-      if (!reader) {
-        res.write("data: [DONE]\n\n");
-        return res.end();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        yield "data: [DONE]\n\n";
+        break;
       }
-
-      // 处理流
-      try {
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        let messageId = "";
-        let firstResult = true;
-        
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          
-          buffer += decoder.decode(value, { stream: true });
-          let lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-          
-          for (const line of lines) {
-            if (!line.trim()) continue;
-            const idx = line.indexOf(":");
-            if (idx === -1) continue;
-            
-            const key = line.slice(0, idx);
-            let val = line.slice(idx + 1).trim();
-            if (val.startsWith('"') && val.endsWith('"')) {
-              val = val.slice(1, -1);
-            }
-            
-            if (key === "f") {
-              // 记录 messageId
-              try {
-                const obj = JSON.parse(val);
-                messageId = obj.messageId || "";
-              } catch (e) {
-                console.error("Error parsing messageId:", e);
-              }
-            } else if (key === "g") {
-              const delta = firstResult
-                ? {
-                    role: "assistant",
-                    reasoning_content: val.replace(/\\n/g, "\n"),
-                  }
-                : { reasoning_content: val.replace(/\\n/g, "\n") };
-              
-              // 思考过程
-              const chunk = {
-                id: messageId || "",
-                object: "chat.completion.chunk",
-                created: Math.floor(Date.now() / 1000),
-                model: "chat-model-reasoning",
-                choices: [
-                  {
-                    delta,
-                    index: 0,
-                    finish_reason: null,
-                  },
-                ],
-              };
-              
-              res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-            } else if (key === "0") {
-              // 最终结果
-              const delta = { content: val.replace(/\\n/g, "\n") };
-              const chunk = {
-                id: messageId || "",
-                object: "chat.completion.chunk",
-                created: Math.floor(Date.now() / 1000),
-                model: "chat-model-reasoning",
-                choices: [
-                  {
-                    delta,
-                    index: 0,
-                    finish_reason: null,
-                  },
-                ],
-              };
-              
-              res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-              firstResult = false;
-            } else if (key === "e" || key === "d") {
-              // 结束
-              res.write("data: [DONE]\n\n");
-            }
-          }
-        }
-        
-        // 确保最后发送结束标记
-        res.write("data: [DONE]\n\n");
-        res.end();
-      } catch (error) {
-        console.error("Stream processing error:", error);
-        res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
-        res.write("data: [DONE]\n\n");
-        res.end();
-      }
-    } else {
-      // 4.2 非流式响应
-      const text = await response.text();
-      const lines = text.split("\n");
-      const data = {};
+      
+      buffer += decoder.decode(value, { stream: true });
+      let lines = buffer.split("\n");
+      buffer = lines.pop() || "";
       
       for (const line of lines) {
         if (!line.trim()) continue;
@@ -188,85 +102,304 @@ app.post('/v1/chat/completions', authMiddleware, async (req, res) => {
         
         const key = line.slice(0, idx);
         let val = line.slice(idx + 1).trim();
-        try {
-          val = JSON.parse(val);
-        } catch (e) {
-          // 如果解析失败，保留原始字符串
+        if (val.startsWith('"') && val.endsWith('"')) {
+          val = val.slice(1, -1);
         }
-        data[key] = val;
+        
+        if (key === "f") {
+          // 记录 messageId
+          try {
+            const obj = JSON.parse(val);
+            messageId = obj.messageId || "";
+          } catch (error) {
+            console.error("Error parsing messageId:", error);
+          }
+        } else if (key === "g") {
+          const delta = firstResult
+            ? {
+                role: "assistant",
+                reasoning_content: val.replace(/\\n/g, "\n"),
+              }
+            : { reasoning_content: val.replace(/\\n/g, "\n") };
+          
+          // 思考过程
+          const chunk = {
+            id: messageId || crypto.randomUUID(),
+            object: "chat.completion.chunk",
+            created: Math.floor(Date.now() / 1000),
+            model: "unlimitedai-chat",
+            choices: [
+              {
+                delta,
+                index: 0,
+                finish_reason: null,
+              },
+            ],
+          };
+          
+          yield `data: ${JSON.stringify(chunk)}\n\n`;
+        } else if (key === "0") {
+          // 最终结果
+          const delta = { content: val.replace(/\\n/g, "\n") };
+          const chunk = {
+            id: messageId || crypto.randomUUID(),
+            object: "chat.completion.chunk",
+            created: Math.floor(Date.now() / 1000),
+            model: "unlimitedai-chat",
+            choices: [
+              {
+                delta,
+                index: 0,
+                finish_reason: null,
+              },
+            ],
+          };
+          
+          yield `data: ${JSON.stringify(chunk)}\n\n`;
+          firstResult = false;
+        } else if (key === "e" || key === "d") {
+          // 结束
+          yield "data: [DONE]\n\n";
+        }
+      }
+    }
+  } catch (error) {
+    console.error("Stream transformation error:", error);
+    yield "data: [DONE]\n\n";
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+// 转换非流式响应
+async function transformNonStreamResponse(text: string): Promise<any> {
+  const lines = text.split("\n");
+  const data: Record<string, any> = {};
+  
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const idx = line.indexOf(":");
+    if (idx === -1) continue;
+    
+    const key = line.slice(0, idx);
+    let val = line.slice(idx + 1).trim();
+    try {
+      val = JSON.parse(val);
+    } catch (error) {
+      // 如果解析失败，保持原始字符串
+    }
+    
+    data[key] = val;
+  }
+  
+  const content = data["0"];
+  const reasoning_content = data.g;
+  
+  return {
+    id: data.f?.messageId || crypto.randomUUID(),
+    object: "chat.completion",
+    created: Math.floor(Date.now() / 1000),
+    model: "unlimitedai-chat",
+    choices: [
+      {
+        index: 0,
+        message: {
+          role: "assistant",
+          reasoning_content,
+          content,
+        },
+        finish_reason: "stop",
+      },
+    ],
+    usage: {
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      total_tokens: 0,
+    },
+  };
+}
+
+// 处理聊天完成请求
+async function handleChatCompletions(
+  openaiBody: any,
+  isStream: boolean,
+  retryCount = 0
+): Promise<Response> {
+  try {
+    // 转换为 UnlimitedAI.Chat 请求体
+    const unlimitedBody = convertOpenAIToUnlimitedBody(openaiBody);
+    
+    // 只转发必要 headers
+    const upstreamHeaders = {
+      "content-type": "application/json",
+      // 可以根据需要转发 Authorization 等
+    };
+    
+    // 转发到 UnlimitedAI.Chat
+    const upstreamRes = await fetch(UNLIMITED_AI_URL, {
+      method: "POST",
+      headers: upstreamHeaders,
+      body: JSON.stringify(unlimitedBody),
+    });
+    
+    if (!upstreamRes.ok) {
+      throw new Error(`Chat completion failed: ${upstreamRes.status}`);
+    }
+    
+    if (isStream) {
+      // 流式响应处理
+      const reader = upstreamRes.body?.getReader();
+      if (!reader) {
+        throw new Error("Failed to get response body reader");
       }
       
-      // 优先用 0 字段，其次 g 字段
-      const content = data["0"] || data.g || "";
+      const transformedStream = new ReadableStream({
+        async start(controller) {
+          try {
+            for await (const chunk of transformStreamResponse(reader)) {
+              controller.enqueue(new TextEncoder().encode(chunk));
+            }
+            controller.close();
+          } catch (error) {
+            console.error("Stream transformation error:", error);
+            controller.error(error);
+          }
+        },
+      });
       
-      res.json({
-        id: data.f?.messageId || uuidv4(),
-        object: "chat.completion",
-        created: Math.floor(Date.now() / 1000),
-        model: "chat-model-reasoning",
-        choices: [
-          {
-            index: 0,
-            message: {
-              role: "assistant",
-              content,
-            },
-            finish_reason: "stop",
-          },
-        ],
+      return new Response(transformedStream, {
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          "Connection": "keep-alive",
+          "Access-Control-Allow-Origin": "*",
+        },
+      });
+    } else {
+      // 非流式响应处理
+      const text = await upstreamRes.text();
+      const transformedResponse = await transformNonStreamResponse(text);
+      
+      return new Response(JSON.stringify(transformedResponse), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
       });
     }
   } catch (error) {
-    console.error("Error in chat completions:", error);
-    res.status(500).json({ 
-      error: {
-        message: error.message,
-        type: "server_error",
-        param: null,
-        code: "internal_server_error"
-      }
-    });
-  }
-});
-
-// 获取模型列表端点
-app.get('/v1/models', authMiddleware, (req, res) => {
-  try {
-    res.json({
-      object: "list",
-      data: [
-        {
-          id: "chat-model-reasoning",
-          object: "model",
-          created: Math.floor(Date.now() / 1000),
-          owned_by: "unlimitedai",
-          permission: [],
+    console.error("Request handling error:", error);
+    
+    return new Response(
+      JSON.stringify({ error: "Internal server error", message: error.message }),
+      {
+        status: 500,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
         },
-      ],
-    });
-  } catch (error) {
-    console.error("Error in models endpoint:", error);
-    res.status(500).json({ 
-      error: {
-        message: error.message,
-        type: "server_error",
-        param: null,
-        code: "internal_server_error"
-      }
+      },
+    );
+  }
+}
+
+// 主处理函数
+async function handler(req: Request): Promise<Response> {
+  const url = new URL(req.url);
+  const path = url.pathname;
+
+  // CORS预检请求处理
+  if (req.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "Access-Control-Max-Age": "86400",
+      },
     });
   }
-});
 
-// 根路径响应
-app.all('*', (req, res) => {
-  res.json({
-    status: "Running...",
-    message: "UnlimitedAI.Chat API Proxy"
-  });
-});
+  try {
+    // 模型列表接口
+    if (path === "/v1/models" && req.method === "GET") {
+      return new Response(
+        JSON.stringify({
+          object: "list",
+          data: [
+            {
+              id: "unlimitedai-chat",
+              object: "model",
+              created: 0,
+              owned_by: "unlimitedai",
+              permission: [{
+                id: "modelperm-unlimitedai-chat",
+                object: "model_permission",
+                created: 0,
+                allow_create_engine: false,
+                allow_sampling: true,
+                allow_logprobs: false,
+                allow_search_indices: false,
+                allow_view: true,
+                allow_fine_tuning: false,
+                organization: "*",
+                group: null,
+                is_blocking: false,
+              }],
+              root: "unlimitedai-chat",
+              parent: null,
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          },
+        }
+      );
+    }
+    
+    // 聊天完成接口
+    else if (path === "/v1/chat/completions" && req.method === "POST") {
+      const openaiBody = await req.json();
+      const isStream = openaiBody.stream === true;
+      
+      return await handleChatCompletions(openaiBody, isStream);
+    }
+    
+    // 未找到路由
+    else {
+      return new Response(
+        JSON.stringify({ error: "Not found", message: "Endpoint not supported" }),
+        {
+          status: 404,
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          },
+        }
+      );
+    }
+  } catch (error) {
+    console.error("Request handling error:", error);
+    
+    return new Response(
+      JSON.stringify({ error: "Internal server error", message: error.message }),
+      {
+        status: 500,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+      }
+    );
+  }
+}
 
 // 启动服务器
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`UnlimitedAI.Chat API Proxy running on port ${PORT}`);
-});
+console.log(`Starting server on port ${PORT}...`);
+serve(handler, { port: PORT });
