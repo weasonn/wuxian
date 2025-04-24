@@ -2,8 +2,8 @@ import { serve } from "https://deno.land/std@0.220.1/http/server.ts";
 
 // 定义常量
 const API_URL = "https://mcp.scira.ai/api/chat";
-const FIXED_USER_ID = "ju2Nz3WY1Y1lHOmzurWAc";
-const FIXED_CHAT_ID = "2kYG_fTIXEwhQVt8NRQaW";
+const FIXED_USER_ID = "2jFMDM1A1R_XxOTxPjhwe";
+const FIXED_CHAT_ID = "ZIWa36kd6MSqzw-ifXGzE";
 const DEFAULT_MODEL = "qwen-qwq";
 const PORT = 8888;
 
