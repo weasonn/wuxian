@@ -141,6 +141,7 @@ async function handleChatCompletions(
     const unlimitedBody = convertOpenAIToUnlimitedBody(openaiBody);
     
     const upstreamHeaders = {
+      "Host": "app.unlimitedai.chat",
       "Content-Type": "application/json",
       "User-Agent": "Mozilla/5.0 (X11; Windows x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
     };
