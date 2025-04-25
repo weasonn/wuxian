@@ -1,215 +1,167 @@
-import { serve } from "https://deno.land/std@0.220.1/http/server.ts";
+// No external imports needed for Deno.serve
 
-const UNLIMITED_AI_URL = "https://app.unlimitedai.chat/api/chat";
-const PORT = 3000;
-const MAX_RETRIES = 3;
+const LANGTAIL_API_URL = "https://app.langtail.com/api/playground";
 
-interface UnlimitedAIMessage {
-  id: string;
-  createdAt: string;
-  role: string;
-  content: string;
-  parts: Array<{ type: string; text: string }>;
-}
+// Hardcoded models in OpenAI format
+const OPENAI_MODELS = {
+  object: "list",
+  data: [
+    // OpenAI Models
+    { id: "o3", object: "model", created: 0, owned_by: "openai", permission: [] },
+    { id: "o4-mini", object: "model", created: 0, owned_by: "openai", permission: [] },
+    { id: "o1", object: "model", created: 0, owned_by: "openai", permission: [] },
+    { id: "o1-preview", object: "model", created: 0, owned_by: "openai", permission: [] },
+    { id: "o1-mini", object: "model", created: 0, owned_by: "openai", permission: [] },
+    { id: "o3-mini", object: "model", created: 0, owned_by: "openai", permission: [] },
+    { id: "gpt-4.1", object: "model", created: 0, owned_by: "openai", permission: [] },
+    { id: "gpt-4.1-mini", object: "model", created: 0, owned_by: "openai", permission: [] },
+    { id: "gpt-4.1-nano", object: "model", created: 0, owned_by: "openai", permission: [] },
+    { id: "gpt-4.5-preview", object: "model", created: 0, owned_by: "openai", permission: [] },
+    { id: "gpt-4o", object: "model", created: 0, owned_by: "openai", permission: [] },
+    { id: "gpt-4o-mini", object: "model", created: 0, owned_by: "openai", permission: [] },
+    { id: "gpt-4o-2024-08-06", object: "model", created: 0, owned_by: "openai", permission: [] },
+    { id: "gpt-4-turbo", object: "model", created: 0, owned_by: "openai", permission: [] },
+    { id: "gpt-4", object: "model", created: 0, owned_by: "openai", permission: [] },
+    { id: "gpt-3.5-turbo", object: "model", created: 0, owned_by: "openai", permission: [] },
 
-interface OpenAIMessage {
-  role: string;
-  content: string;
-}
+    // Anthropic Models
+    { id: "anthropic:claude-3-7-sonnet-latest", object: "model", created: 0, owned_by: "anthropic", permission: [] },
+    { id: "anthropic:claude-3-7-sonnet-20250219", object: "model", created: 0, owned_by: "anthropic", permission: [] },
+    { id: "anthropic:claude-3-5-haiku-latest", object: "model", created: 0, owned_by: "anthropic", permission: [] },
+    { id: "anthropic:claude-3-opus-20240229", object: "model", created: 0, owned_by: "anthropic", permission: [] },
+    { id: "anthropic:claude-3-sonnet-20240229", object: "model", created: 0, owned_by: "anthropic", permission: [] },
+    { id: "anthropic:claude-3-haiku-20240307", object: "model", created: 0, owned_by: "anthropic", permission: [] },
+    { id: "anthropic:claude-3-5-sonnet-20240620", object: "model", created: 0, owned_by: "anthropic", permission: [] },
+    { id: "anthropic:claude-3-5-sonnet-latest", object: "model", created: 0, owned_by: "anthropic", permission: [] },
 
-function convertOpenAIToUnlimitedMessages(messages: OpenAIMessage[]): UnlimitedAIMessage[] {
-  const systemMessages = messages.filter(msg => msg.role === "system");
-  const nonSystemMessages = messages.filter(msg => msg.role !== "system");
-  
-  const result: UnlimitedAIMessage[] = [];
-  
-  if (systemMessages.length > 0) {
-    const systemContent = systemMessages.map(msg => msg.content).join("\n\n");
-    
-    result.push({
-      id: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
-      role: "user",
-      content: systemContent,
-      parts: [{ type: "text", text: systemContent }],
-    });
-    
-    result.push({
-      id: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
-      role: "assistant",
-      content: "Ok, I got it, I'll remember it and do it.",
-      parts: [{ type: "text", text: "Ok, I got it, I'll remember it and do it." }],
+    // Google Models
+    { id: "google:gemini-2.5-flash-preview-04-17", object: "model", created: 0, owned_by: "google", permission: [] },
+    { id: "google:gemini-2.5-pro-preview-03-25", object: "model", created: 0, owned_by: "google", permission: [] },
+    { id: "google:gemini-2.5-pro-exp-03-25", object: "model", created: 0, owned_by: "google", permission: [] },
+    { id: "google:gemini-2.0-flash", object: "model", created: 0, owned_by: "google", permission: [] },
+    { id: "google:gemini-2.0-flash-lite-preview-02-05", object: "model", created: 0, owned_by: "google", permission: [] },
+    { id: "google:gemini-2.0-flash-thinking-exp-01-21", object: "model", created: 0, owned_by: "google", permission: [] },
+    { id: "google:gemini-2.0-pro-exp-02-05", object: "model", created: 0, owned_by: "google", permission: [] },
+    { id: "google:gemini-1.5-flash-8b", object: "model", created: 0, owned_by: "google", permission: [] },
+    { id: "google:gemini-1.5-flash", object: "model", created: 0, owned_by: "google", permission: [] },
+    { id: "google:gemini-1.5-flash-001", object: "model", created: 0, owned_by: "google", permission: [] },
+    { id: "google:gemini-1.5-flash-002", object: "model", created: 0, owned_by: "google", permission: [] },
+    { id: "google:gemini-1.5-pro", object: "model", created: 0, owned_by: "google", permission: [] },
+    { id: "google:gemini-2.0-flash-exp", object: "model", created: 0, owned_by: "google", permission: [] },
+    { id: "google:gemini-exp-1206", object: "model", created: 0, owned_by: "google", permission: [] },
+  ].map(model => ({
+    ...model,
+    created: Math.floor(Date.now() / 1000), // Use current timestamp for created
+    permission: [{
+      id: `modelperm-${Math.random().toString(36).substring(2, 15)}`, // Generate a random ID
+      object: "model_permission",
+      created: Math.floor(Date.now() / 1000),
+      allow_create_engine: true,
+      allow_sampling: true,
+      allow_logprobs: true,
+      allow_search_indices: true,
+      allow_view: true,
+      allow_fine_tuning: false,
+      organization: "*",
+      group: null,
+      is_blocking: false,
+    }]
+  }))
+};
+
+async function handleRequest(request: Request): Promise<Response> {
+  const url = new URL(request.url);
+  const path = url.pathname;
+
+  // Check for supported prefixes
+  const isSupportedPath = path === "/" || path === "/v1" || path === "/v1/chat/completions" || path === "/v1/models";
+
+  if (!isSupportedPath) {
+    return new Response("Not Found", { status: 404 });
+  }
+
+  // Handle models endpoint
+  if (path === "/v1/models") {
+    return new Response(JSON.stringify(OPENAI_MODELS), {
+      headers: { "Content-Type": "application/json" },
     });
   }
-  
-  nonSystemMessages.forEach(msg => {
-    result.push({
-      id: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
-      role: msg.role,
-      content: msg.content,
-      parts: [{ type: "text", text: msg.content }],
-    });
-  });
-  
-  return result;
-}
 
-function convertOpenAIToUnlimitedBody(openaiBody: any): any {
-  return {
-    id: crypto.randomUUID(),
-    messages: convertOpenAIToUnlimitedMessages(openaiBody.messages),
-    selectedChatModel: openaiBody.model || "chat-model-reasoning",
-  };
-}
-
-async function* transformStreamResponse(reader: ReadableStreamDefaultReader<Uint8Array>): AsyncGenerator<string> {
-  let buffer = "";
-  const decoder = new TextDecoder();
-  let messageId = crypto.randomUUID();
-  let hasContentStarted = false;
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        yield "data: [DONE]\n\n";
-        break;
-      }
-      
-      buffer += decoder.decode(value, { stream: true });
-      let lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-      
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        const idx = line.indexOf(":");
-        if (idx === -1) continue;
-        
-        const key = line.slice(0, idx);
-        let val = line.slice(idx + 1).trim();
-        if (val.startsWith('"') && val.endsWith('"')) {
-          val = val.slice(1, -1);
-        }
-        
-        if (key === "f") {
-          try {
-            const obj = JSON.parse(val);
-            messageId = obj.messageId || messageId;
-          } catch {}
-        } 
-        
-        const contentChunk = key === "g" || key === "0" ? val.replace(/\\n/g, "\n") : "";
-        if (contentChunk) {
-          const delta = key === "g" && !hasContentStarted 
-            ? { role: "assistant", content: contentChunk }
-            : { content: contentChunk };
-          
-          const chunk = {
-            id: messageId,
-            object: "chat.completion.chunk",
-            created: Math.floor(Date.now() / 1000),
-            model: "chat-model-reasoning",
-            choices: [{
-              delta,
-              index: 0,
-              finish_reason: null,
-            }],
-          };
-          
-          yield `data: ${JSON.stringify(chunk)}\n\n`;
-          hasContentStarted = true;
-        }
-        
-        if (key === "e" || key === "d") {
-          yield "data: [DONE]\n\n";
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
+  // Handle chat completions endpoint
+  if (request.method !== "POST") {
+    return new Response("Method Not Allowed", { status: 405 });
   }
-}
 
-async function handleChatCompletions(
-  openaiBody: any,
-  isStream: boolean,
-  retryCount = 0
-): Promise<Response> {
+  let cookies: string | undefined;
+  let organizationId: string | undefined;
+  let projectId: string | undefined;
+
   try {
-    const unlimitedBody = convertOpenAIToUnlimitedBody(openaiBody);
-    
-    const upstreamHeaders = {
-      "Host": "app.unlimitedai.chat",
-      "Content-Type": "application/json",
-      "User-Agent": "Mozilla/5.0 (X11; Windows x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
-    };
-    
-    const upstreamRes = await fetch(UNLIMITED_AI_URL, {
-      method: "POST",
-      headers: upstreamHeaders,
-      body: JSON.stringify(unlimitedBody),
-    });
-    
-    if (!upstreamRes.ok) {
-      if (upstreamRes.status >= 500 && retryCount < MAX_RETRIES) {
-        return handleChatCompletions(openaiBody, isStream, retryCount + 1);
-      }
-      throw new Error(`Chat completion failed: ${upstreamRes.status}`);
+    // Extract cookies and project info from the custom header
+    const authHeader = request.headers.get("Authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return new Response("Missing or invalid Authorization header. Use Bearer <__Host-authjs.csrf-token>;;<next-auth.session-token>;;<organizationId>;;<projectId>", { status: 401 });
     }
-    
-    if (isStream) {
-      const reader = upstreamRes.body?.getReader();
-      if (!reader) throw new Error("Failed to get reader");
-      
-      const stream = new ReadableStream({
-        async start(controller) {
-          for await (const chunk of transformStreamResponse(reader)) {
-            controller.enqueue(new TextEncoder().encode(chunk));
-          }
-          controller.close();
-        }
-      });
-      
-      return new Response(stream, {
-        headers: {
-          "Content-Type": "text/event-stream",
-          "Access-Control-Allow-Origin": "*",
-        },
-      });
-    } else {
-      const responseData = await upstreamRes.json();
-      
-      return new Response(JSON.stringify({
-        id: responseData.messageId || crypto.randomUUID(),
-        object: "chat.completion",
-        created: Math.floor(Date.now() / 1000),
-        model: "chat-model-reasoning",
-        choices: [{
-          message: {
-            role: "assistant",
-            content: responseData.content,
-          },
-          finish_reason: "stop",
-        }],
-      }), {
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-      });
+
+    const authParts = authHeader.substring(7).split(";;");
+    if (authParts.length !== 4) {
+      return new Response("Invalid Authorization header format. Use Bearer <__Host-authjs.csrf-token>;;<next-auth.session-token>;;<organizationId>;;<projectId>", { status: 400 });
     }
+
+    const csrfToken = authParts[0];
+    const sessionToken = authParts[1];
+    organizationId = authParts[2];
+    projectId = authParts[3];
+
+    cookies = `__Host-authjs.csrf-token=${csrfToken}; next-auth.session-token=${sessionToken}`;
+
   } catch (error) {
-    if (retryCount < MAX_RETRIES) {
-      return handleChatCompletions(openaiBody, isStream, retryCount + 1);
+    console.error("Error parsing auth header:", error);
+    return new Response("Error processing Authorization header", { status: 400 });
+  }
+
+  try {
+    const openaiPayload = await request.json();
+
+    // Transform OpenAI payload to Langtail payload
+    const langtailPayload = {
+      llm: {
+        messages: openaiPayload.messages,
+        model: openaiPayload.model || "anthropic:claude-3-7-sonnet-latest", // Default model
+        temperature: openaiPayload.temperature ?? 0.5,
+        max_tokens: openaiPayload.max_tokens ?? 4000,
+        top_p: openaiPayload.top_p ?? 1,
+        presence_penalty: openaiPayload.presence_penalty ?? 0,
+        frequency_penalty: openaiPayload.frequency_penalty ?? 0,
+        stream: openaiPayload.stream ?? false,
+      },
+      organizationId: organizationId,
+      projectId: projectId,
+      variables: {}, // Assuming no variables are passed in this setup
+    };
+
+    const headers = new Headers(request.headers);
+    headers.set("Content-Type", "application/json");
+    if (cookies) {
+      headers.set("Cookie", cookies);
     }
-    return new Response(
-      JSON.stringify({ error: "Internal server error", message: error.message }),
-      { status: 500, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }
-    );
+    // Remove the custom Authorization header
+    headers.delete("Authorization");
+
+    const langtailResponse = await fetch(LANGTAIL_API_URL, {
+      method: "POST",
+      headers: headers,
+      body: JSON.stringify(langtailPayload),
+    });
+
+    // Langtail's response is already in OpenAI format, so we can return it directly
+    return langtailResponse;
+
+  } catch (error) {
+    console.error("Error processing request or fetching from Langtail:", error);
+    return new Response("Internal Server Error", { status: 500 });
   }
 }
 
-async function handler(req: Request): Promise<Response> {
-  // ... [保持原有CORS和路由逻辑不变，仅在非流式处理处调用新的响应转换]
-}
-
-serve(handler, { port: PORT });
+// Use Deno.serve directly
+Deno.serve({ port: 8000 }, handleRequest);
