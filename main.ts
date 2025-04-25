@@ -1,6 +1,6 @@
 const API_DOMAIN = 'https://ai-api.dangbei.net';
 const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36';
-const VALID_API_KEY = 'sk-180867';
+const VALID_API_KEY = 'sk_gUXNcLwm0rnnEt55Mg8hq88';
 const MAX_CONVERSATION_COUNT = 50;
 
 class ChatManage {
