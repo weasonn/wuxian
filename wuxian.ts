@@ -1,167 +1,288 @@
-// No external imports needed for Deno.serve
+const express = require('express');
+const { v4: uuidv4 } = require('uuid');
+const { HttpsProxyAgent } = require('https-proxy-agent');
+const app = express();
 
-const LANGTAIL_API_URL = "https://app.langtail.com/api/playground";
+// 中间件
+app.use(express.json());
+app.use(express.text());
 
-// Hardcoded models in OpenAI format
-const OPENAI_MODELS = {
-  object: "list",
-  data: [
-    // OpenAI Models
-    { id: "o3", object: "model", created: 0, owned_by: "openai", permission: [] },
-    { id: "o4-mini", object: "model", created: 0, owned_by: "openai", permission: [] },
-    { id: "o1", object: "model", created: 0, owned_by: "openai", permission: [] },
-    { id: "o1-preview", object: "model", created: 0, owned_by: "openai", permission: [] },
-    { id: "o1-mini", object: "model", created: 0, owned_by: "openai", permission: [] },
-    { id: "o3-mini", object: "model", created: 0, owned_by: "openai", permission: [] },
-    { id: "gpt-4.1", object: "model", created: 0, owned_by: "openai", permission: [] },
-    { id: "gpt-4.1-mini", object: "model", created: 0, owned_by: "openai", permission: [] },
-    { id: "gpt-4.1-nano", object: "model", created: 0, owned_by: "openai", permission: [] },
-    { id: "gpt-4.5-preview", object: "model", created: 0, owned_by: "openai", permission: [] },
-    { id: "gpt-4o", object: "model", created: 0, owned_by: "openai", permission: [] },
-    { id: "gpt-4o-mini", object: "model", created: 0, owned_by: "openai", permission: [] },
-    { id: "gpt-4o-2024-08-06", object: "model", created: 0, owned_by: "openai", permission: [] },
-    { id: "gpt-4-turbo", object: "model", created: 0, owned_by: "openai", permission: [] },
-    { id: "gpt-4", object: "model", created: 0, owned_by: "openai", permission: [] },
-    { id: "gpt-3.5-turbo", object: "model", created: 0, owned_by: "openai", permission: [] },
-
-    // Anthropic Models
-    { id: "anthropic:claude-3-7-sonnet-latest", object: "model", created: 0, owned_by: "anthropic", permission: [] },
-    { id: "anthropic:claude-3-7-sonnet-20250219", object: "model", created: 0, owned_by: "anthropic", permission: [] },
-    { id: "anthropic:claude-3-5-haiku-latest", object: "model", created: 0, owned_by: "anthropic", permission: [] },
-    { id: "anthropic:claude-3-opus-20240229", object: "model", created: 0, owned_by: "anthropic", permission: [] },
-    { id: "anthropic:claude-3-sonnet-20240229", object: "model", created: 0, owned_by: "anthropic", permission: [] },
-    { id: "anthropic:claude-3-haiku-20240307", object: "model", created: 0, owned_by: "anthropic", permission: [] },
-    { id: "anthropic:claude-3-5-sonnet-20240620", object: "model", created: 0, owned_by: "anthropic", permission: [] },
-    { id: "anthropic:claude-3-5-sonnet-latest", object: "model", created: 0, owned_by: "anthropic", permission: [] },
-
-    // Google Models
-    { id: "google:gemini-2.5-flash-preview-04-17", object: "model", created: 0, owned_by: "google", permission: [] },
-    { id: "google:gemini-2.5-pro-preview-03-25", object: "model", created: 0, owned_by: "google", permission: [] },
-    { id: "google:gemini-2.5-pro-exp-03-25", object: "model", created: 0, owned_by: "google", permission: [] },
-    { id: "google:gemini-2.0-flash", object: "model", created: 0, owned_by: "google", permission: [] },
-    { id: "google:gemini-2.0-flash-lite-preview-02-05", object: "model", created: 0, owned_by: "google", permission: [] },
-    { id: "google:gemini-2.0-flash-thinking-exp-01-21", object: "model", created: 0, owned_by: "google", permission: [] },
-    { id: "google:gemini-2.0-pro-exp-02-05", object: "model", created: 0, owned_by: "google", permission: [] },
-    { id: "google:gemini-1.5-flash-8b", object: "model", created: 0, owned_by: "google", permission: [] },
-    { id: "google:gemini-1.5-flash", object: "model", created: 0, owned_by: "google", permission: [] },
-    { id: "google:gemini-1.5-flash-001", object: "model", created: 0, owned_by: "google", permission: [] },
-    { id: "google:gemini-1.5-flash-002", object: "model", created: 0, owned_by: "google", permission: [] },
-    { id: "google:gemini-1.5-pro", object: "model", created: 0, owned_by: "google", permission: [] },
-    { id: "google:gemini-2.0-flash-exp", object: "model", created: 0, owned_by: "google", permission: [] },
-    { id: "google:gemini-exp-1206", object: "model", created: 0, owned_by: "google", permission: [] },
-  ].map(model => ({
-    ...model,
-    created: Math.floor(Date.now() / 1000), // Use current timestamp for created
-    permission: [{
-      id: `modelperm-${Math.random().toString(36).substring(2, 15)}`, // Generate a random ID
-      object: "model_permission",
-      created: Math.floor(Date.now() / 1000),
-      allow_create_engine: true,
-      allow_sampling: true,
-      allow_logprobs: true,
-      allow_search_indices: true,
-      allow_view: true,
-      allow_fine_tuning: false,
-      organization: "*",
-      group: null,
-      is_blocking: false,
-    }]
-  }))
+// 全局变量配置 - 从环境变量加载
+const AUTH_TOKEN = process.env.AUTH_TOKEN || '';
+const PROXY = process.env.PROXY || '';
+const authMiddleware = (req, res, next) => {
+  if (AUTH_TOKEN) {
+    const requestToken = req.headers.authorization || '';
+    const token = requestToken.replace('Bearer ', '');
+    if (token !== AUTH_TOKEN) {
+      return res.status(401).send('Access Denied');
+    }
+  }
+  next();
 };
 
-async function handleRequest(request: Request): Promise<Response> {
-  const url = new URL(request.url);
-  const path = url.pathname;
-
-  // Check for supported prefixes
-  const isSupportedPath = path === "/" || path === "/v1" || path === "/v1/chat/completions" || path === "/v1/models";
-
-  if (!isSupportedPath) {
-    return new Response("Not Found", { status: 404 });
-  }
-
-  // Handle models endpoint
-  if (path === "/v1/models") {
-    return new Response(JSON.stringify(OPENAI_MODELS), {
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  // Handle chat completions endpoint
-  if (request.method !== "POST") {
-    return new Response("Method Not Allowed", { status: 405 });
-  }
-
-  let cookies: string | undefined;
-  let organizationId: string | undefined;
-  let projectId: string | undefined;
-
-  try {
-    // Extract cookies and project info from the custom header
-    const authHeader = request.headers.get("Authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return new Response("Missing or invalid Authorization header. Use Bearer <__Host-authjs.csrf-token>;;<next-auth.session-token>;;<organizationId>;;<projectId>", { status: 401 });
-    }
-
-    const authParts = authHeader.substring(7).split(";;");
-    if (authParts.length !== 4) {
-      return new Response("Invalid Authorization header format. Use Bearer <__Host-authjs.csrf-token>;;<next-auth.session-token>;;<organizationId>;;<projectId>", { status: 400 });
-    }
-
-    const csrfToken = authParts[0];
-    const sessionToken = authParts[1];
-    organizationId = authParts[2];
-    projectId = authParts[3];
-
-    cookies = `__Host-authjs.csrf-token=${csrfToken}; next-auth.session-token=${sessionToken}`;
-
-  } catch (error) {
-    console.error("Error parsing auth header:", error);
-    return new Response("Error processing Authorization header", { status: 400 });
-  }
-
-  try {
-    const openaiPayload = await request.json();
-
-    // Transform OpenAI payload to Langtail payload
-    const langtailPayload = {
-      llm: {
-        messages: openaiPayload.messages,
-        model: openaiPayload.model || "anthropic:claude-3-7-sonnet-latest", // Default model
-        temperature: openaiPayload.temperature ?? 0.5,
-        max_tokens: openaiPayload.max_tokens ?? 4000,
-        top_p: openaiPayload.top_p ?? 1,
-        presence_penalty: openaiPayload.presence_penalty ?? 0,
-        frequency_penalty: openaiPayload.frequency_penalty ?? 0,
-        stream: openaiPayload.stream ?? false,
-      },
-      organizationId: organizationId,
-      projectId: projectId,
-      variables: {}, // Assuming no variables are passed in this setup
-    };
-
-    const headers = new Headers(request.headers);
-    headers.set("Content-Type", "application/json");
-    if (cookies) {
-      headers.set("Cookie", cookies);
-    }
-    // Remove the custom Authorization header
-    headers.delete("Authorization");
-
-    const langtailResponse = await fetch(LANGTAIL_API_URL, {
-      method: "POST",
-      headers: headers,
-      body: JSON.stringify(langtailPayload),
-    });
-
-    // Langtail's response is already in OpenAI format, so we can return it directly
-    return langtailResponse;
-
-  } catch (error) {
-    console.error("Error processing request or fetching from Langtail:", error);
-    return new Response("Internal Server Error", { status: 500 });
-  }
+// 工具：OpenAI -> UnlimitedAI.Chat 消息格式转换
+function openaiToUnlimitedMessages(messages) {
+  return messages
+    .filter((msg) => msg.role !== "system")
+    .map((msg) => ({
+      id: uuidv4(),
+      createdAt: new Date().toISOString(),
+      role: msg.role,
+      content: msg.content,
+      parts: [{ type: "text", text: msg.content }],
+    }));
 }
 
-// Use Deno.serve directly
-Deno.serve({ port: 8000 }, handleRequest);
+// 工具：OpenAI -> UnlimitedAI.Chat 请求体转换
+function openaiToUnlimitedBody(openaiBody) {
+  return {
+    id: openaiBody.id || uuidv4(),
+    messages: openaiToUnlimitedMessages(openaiBody.messages),
+    selectedChatModel: openaiBody.model || "chat-model-reasoning",
+    // 你可以根据需要添加更多字段映射
+  };
+}
+
+// 处理聊天请求
+app.post('/v1/chat/completions', authMiddleware, async (req, res) => {
+  try {
+    // 1. 解析 OpenAI 请求
+    const openaiBody = req.body;
+    const isStream = openaiBody.stream === true;
+
+    // 只转发必要 headers
+    const upstreamHeaders = {
+      "content-type": "application/json",
+      // 你可以根据需要转发 Authorization 等
+    };
+
+    // 2. 转换为 UnlimitedAI.Chat 请求体
+    const unlimitedBody = openaiToUnlimitedBody(openaiBody);
+
+    // 3. 转发到 UnlimitedAI.Chat
+    // 配置请求选项，包括可选的代理
+    const fetchOptions = {
+      method: "POST",
+      headers: upstreamHeaders,
+      body: JSON.stringify(unlimitedBody),
+    };
+
+    // 如果设置了代理，添加代理代理
+    if (PROXY) {
+      console.log(`使用代理: ${PROXY}`);
+      fetchOptions.agent = new HttpsProxyAgent(PROXY);
+    }
+
+    const response = await fetch("https://app.unlimitedai.chat/api/chat", fetchOptions);
+
+    if (!response.ok) {
+      throw new Error(`UnlimitedAI.Chat API responded with status: ${response.status}`);
+    }
+
+    if (isStream) {
+      // 4.1 流式响应（SSE）
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+
+      const reader = response.body;
+      if (!reader) {
+        res.write("data: [DONE]\n\n");
+        return res.end();
+      }
+
+      // 处理流
+      try {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let messageId = "";
+        let firstResult = true;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          let lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            const idx = line.indexOf(":");
+            if (idx === -1) continue;
+
+            const key = line.slice(0, idx);
+            let val = line.slice(idx + 1).trim();
+            if (val.startsWith('"') && val.endsWith('"')) {
+              val = val.slice(1, -1);
+            }
+
+            if (key === "f") {
+              // 记录 messageId
+              try {
+                const obj = JSON.parse(val);
+                messageId = obj.messageId || "";
+              } catch (e) {
+                console.error("Error parsing messageId:", e);
+              }
+            } else if (key === "g") {
+              const delta = firstResult
+                ? {
+                    role: "assistant",
+                    reasoning_content: val.replace(/\\n/g, "\n"),
+                  }
+                : { reasoning_content: val.replace(/\\n/g, "\n") };
+
+              // 思考过程
+              const chunk = {
+                id: messageId || "",
+                object: "chat.completion.chunk",
+                created: Math.floor(Date.now() / 1000),
+                model: "chat-model-reasoning",
+                choices: [
+                  {
+                    delta,
+                    index: 0,
+                    finish_reason: null,
+                  },
+                ],
+              };
+
+              res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+            } else if (key === "0") {
+              // 最终结果
+              const delta = { content: val.replace(/\\n/g, "\n") };
+              const chunk = {
+                id: messageId || "",
+                object: "chat.completion.chunk",
+                created: Math.floor(Date.now() / 1000),
+                model: "chat-model-reasoning",
+                choices: [
+                  {
+                    delta,
+                    index: 0,
+                    finish_reason: null,
+                  },
+                ],
+              };
+
+              res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+              firstResult = false;
+            } else if (key === "e" || key === "d") {
+              // 结束
+              res.write("data: [DONE]\n\n");
+            }
+          }
+        }
+
+        // 确保最后发送结束标记
+        res.write("data: [DONE]\n\n");
+        res.end();
+      } catch (error) {
+        console.error("Stream processing error:", error);
+        res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+        res.write("data: [DONE]\n\n");
+        res.end();
+      }
+    } else {
+      // 4.2 非流式响应
+      const text = await response.text();
+      const lines = text.split("\n");
+      const data = {};
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const idx = line.indexOf(":");
+        if (idx === -1) continue;
+
+        const key = line.slice(0, idx);
+        let val = line.slice(idx + 1).trim();
+        try {
+          val = JSON.parse(val);
+        } catch (e) {
+          // 如果解析失败，保留原始字符串
+        }
+        data[key] = val;
+      }
+
+      // 优先用 0 字段，其次 g 字段
+      const content = data["0"] || data.g || "";
+
+      res.json({
+        id: data.f?.messageId || uuidv4(),
+        object: "chat.completion",
+        created: Math.floor(Date.now() / 1000),
+        model: "chat-model-reasoning",
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: "assistant",
+              content,
+            },
+            finish_reason: "stop",
+          },
+        ],
+      });
+    }
+  } catch (error) {
+    console.error("Error in chat completions:", error);
+    res.status(500).json({
+      error: {
+        message: error.message,
+        type: "server_error",
+        param: null,
+        code: "internal_server_error"
+      }
+    });
+  }
+});
+
+// 获取模型列表端点
+app.get('/v1/models', authMiddleware, (req, res) => {
+  try {
+    res.json({
+      object: "list",
+      data: [
+        {
+          id: "chat-model-reasoning",
+          object: "model",
+          created: Math.floor(Date.now() / 1000),
+          owned_by: "unlimitedai",
+          permission: [],
+        },
+      ],
+    });
+  } catch (error) {
+    console.error("Error in models endpoint:", error);
+    res.status(500).json({
+      error: {
+        message: error.message,
+        type: "server_error",
+        param: null,
+        code: "internal_server_error"
+      }
+    });
+  }
+});
+
+// 根路径响应
+app.all('*', (req, res) => {
+  res.json({
+    status: "Running...",
+    message: "UnlimitedAI.Chat API Proxy"
+  });
+});
+
+// 启动服务器
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`UnlimitedAI.Chat API Proxy running on port ${PORT}`);
+  if (PROXY) {
+    console.log(`代理已配置: ${PROXY}`);
+  } else {
+    console.log('未配置代理，使用直接连接');
+  }
+});
